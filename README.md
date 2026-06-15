@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Data Mining - House Price Prediction
 
 Project khai phá dữ liệu và dự đoán giá thuê phòng/nhà trọ Việt Nam từ [Phongtro123.com](https://phongtro123.com).
@@ -56,3 +57,68 @@ Console sẽ tách riêng từng phần thực thi:
 - `3.4 Neural Network Regression`
 
 Mỗi phần in dự đoán/metric riêng. Phần cuối mới in bảng so sánh tổng hợp MAE/MSE/RMSE/R2.
+
+## Website dự đoán giá thuê Hà Nội
+
+Project có thêm:
+
+- `backend-springboot`: REST API Spring Boot đọc `houseprice_dataset.csv` và train Linear Regression khi khởi động.
+- `frontend-react`: giao diện React nhập diện tích, quận/huyện, ngày đăng và gọi API dự đoán.
+
+### Chạy backend
+
+```powershell
+cd backend-springboot
+mvn spring-boot:run
+```
+
+Backend chạy tại:
+
+```text
+http://localhost:8080
+```
+
+API chính:
+
+- `GET /api/metadata`
+- `POST /api/predict`
+
+### Chạy frontend
+
+Mở terminal khác:
+
+```powershell
+cd frontend-react
+npm install
+npm run dev
+```
+
+Frontend chạy tại:
+
+```text
+http://localhost:5173
+```
+
+Nếu PowerShell chặn `npm`, dùng:
+
+```powershell
+npm.cmd install
+npm.cmd run dev
+```
+
+### Cập nhật dữ liệu Hà Nội
+
+Crawler hiện trỏ về đúng trang Hà Nội:
+
+```text
+https://phongtro123.com/tinh-thanh/ha-noi
+```
+
+Chạy lại:
+
+```powershell
+python crawling.py --max-pages 5 --sleep 1
+```
+=======
+# AI-2025.2
+>>>>>>> 697ccf178514119ddc7e12ff1c1a57c21a8bf798

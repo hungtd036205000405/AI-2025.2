@@ -27,12 +27,8 @@ BASE_URL = "https://phongtro123.com"
 RAW_OUTPUT = "standard_dataset.csv"
 CLEAN_OUTPUT = "houseprice_dataset.csv"
 
-CATEGORY_PATHS = [
-    "/cho-thue-phong-tro",
-    "/cho-thue-can-ho",
-    "/cho-thue-can-ho-mini",
-    "/cho-thue-nha-nguyen-can",
-]
+START_PATH = "/tinh-thanh/ha-noi"
+CATEGORY_PATHS = [START_PATH]
 
 HEADERS = {
     "User-Agent": (
@@ -275,11 +271,106 @@ def clean_location_from_text(*values: str) -> str:
     return "Không rõ"
 
 
+def extract_num_bedrooms(text: str) -> int:
+    text = str(text).lower()
+    match = re.search(r"(\d+)\s*(?:phòng\s+)?ngủ|(\d+)n\b", text)
+    if match:
+        val = match.group(1) or match.group(2)
+        try:
+            return int(val)
+        except ValueError:
+            pass
+    return 1
+
+
+def extract_num_bathrooms(text: str) -> int:
+    text = str(text).lower()
+    match = re.search(r"(\d+)\s*(?:phòng\s+)?(?:tắm|vệ sinh|vs|wc)", text)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            pass
+    if "khép kín" in text:
+        return 1
+    return 1
+
+
+def extract_has_air_conditioning(text: str) -> int:
+    text = str(text).lower()
+    if any(kw in text for kw in ["điều hòa", "dieu hoa", "đh", "ac"]):
+        return 1
+    return 0
+
+
+def extract_furnished(text: str) -> int:
+    text = str(text).lower()
+    if any(kw in text for kw in ["nội thất", "noi that", "full đồ", "full do", "đầy đủ đồ", "tiện nghi"]):
+        return 1
+    return 0
+
+
+def extract_floor(text: str) -> int:
+    text = str(text).lower()
+    match = re.search(r"tầng\s*(\d+)", text)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            pass
+    return 1
+
+
+def extract_room_type(text: str) -> str:
+    text = str(text).lower()
+    if "studio" in text:
+        return "studio"
+    if any(kw in text for kw in ["căn hộ", "chung cư", "ccmn", "duplex", "condo", "apartment"]):
+        return "apartment"
+    if any(kw in text for kw in ["nhà nguyên căn", "nhà riêng", "biệt thự", "nhà phố", "house"]):
+        return "house"
+    return "studio"
+
+
+DISTRICT_DISTANCES = {
+    "Ba Đình": 2.5,
+    "Bắc Từ Liêm": 10.0,
+    "Cầu Giấy": 6.5,
+    "Đống Đa": 3.5,
+    "Hai Bà Trưng": 2.0,
+    "Hà Đông": 12.0,
+    "Hoàn Kiếm": 0.5,
+    "Hoàng Mai": 7.0,
+    "Long Biên": 5.5,
+    "Nam Từ Liêm": 9.0,
+    "Tây Hồ": 5.0,
+    "Thanh Xuân": 6.0,
+}
+
+
+def get_distance_to_center(location: str) -> float:
+    loc_lower = str(location).lower()
+    for district, dist in DISTRICT_DISTANCES.items():
+        if district.lower() in loc_lower:
+            return dist
+    return 5.0
+
+
 def data_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     """Clean raw Vietnamese columns without SettingWithCopyWarning."""
     data = df.copy()
+    
+    # Extract new features first, before dropping Description/Mô tả
+    data["Số phòng ngủ"] = data["Mô tả"].apply(extract_num_bedrooms)
+    data["Số phòng tắm"] = data["Mô tả"].apply(extract_num_bathrooms)
+    data["Điều hòa"] = data["Mô tả"].apply(extract_has_air_conditioning)
+    data["Nội thất"] = data["Mô tả"].apply(extract_furnished)
+    data["Tầng"] = data["Mô tả"].apply(extract_floor)
+    data["Loại phòng"] = data["Mô tả"].apply(extract_room_type)
+    
     data["Diện tích"] = data["Diện tích"].apply(parse_area)
     data["Vị trí"] = data.apply(lambda row: clean_location_from_text(row.get("Vị trí", ""), row.get("Mô tả", "")), axis=1)
+    data["Khoảng cách"] = data["Vị trí"].apply(get_distance_to_center)
     data["Giá phòng"] = data["Giá phòng"].apply(parse_price)
 
     date_parts = data["Ngày đăng"].apply(extract_date_parts)
@@ -288,16 +379,16 @@ def data_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     data["Năm"] = date_parts.apply(lambda x: x[2])
 
     data = data.drop(columns=["Mô tả", "Người đăng", "Đường link", "Ngày đăng"], errors="ignore")
-    data = data.dropna(subset=["Diện tích", "Giá phòng", "Ngày", "Tháng", "Năm"])
+    data = data.dropna(subset=["Diện tích", "Giá phòng", "Ngày", "Tháng", "Năm", "Số phòng ngủ", "Số phòng tắm", "Điều hòa", "Nội thất", "Tầng", "Loại phòng", "Khoảng cách"])
     data = data[(data["Diện tích"] > 0) & (data["Diện tích"] <= 500)]
     data = data[(data["Giá phòng"] > 0) & (data["Giá phòng"] <= 200)]
     return data.reset_index(drop=True)
 
 
 def data_standard(data: pd.DataFrame) -> pd.DataFrame:
-    """One-hot encode location and convert booleans to 0/1."""
-    encoded = pd.get_dummies(data, columns=["Vị trí"], dtype=int)
-    encoded.columns = [column.replace("Vị trí_", "") for column in encoded.columns]
+    """One-hot encode location and room type, convert booleans to 0/1."""
+    encoded = pd.get_dummies(data, columns=["Vị trí", "Loại phòng"], dtype=int)
+    encoded.columns = [column.replace("Vị trí_", "").replace("Loại phòng_", "") for column in encoded.columns]
     return encoded
 
 
@@ -317,8 +408,14 @@ def remove_outlier_zscore(data: pd.DataFrame, columns: list[str] | None = None, 
 def prepare_model_dataset(raw_df: pd.DataFrame, remove_outlier: bool = True) -> pd.DataFrame:
     cleaned = data_cleaning(raw_df)
     standardized = data_standard(cleaned)
-    for column in ["Diện tích", "Giá phòng", "Ngày", "Tháng", "Năm"]:
-        standardized[column] = pd.to_numeric(standardized[column])
+    numeric_cols = [
+        "Diện tích", "Giá phòng", "Ngày", "Tháng", "Năm",
+        "Số phòng ngủ", "Số phòng tắm", "Điều hòa", "Nội thất",
+        "Tầng", "Khoảng cách"
+    ]
+    for column in numeric_cols:
+        if column in standardized.columns:
+            standardized[column] = pd.to_numeric(standardized[column])
     if remove_outlier:
         standardized = remove_outlier_zscore(standardized)
     return standardized.reset_index(drop=True)
@@ -358,13 +455,46 @@ def make_sample_raw_dataset(n: int = 240) -> pd.DataFrame:
     for i in range(n):
         district = random.choice(districts)
         area = random.choice([14, 16, 18, 20, 22, 25, 28, 30, 35, 40, 45, 55])
-        price = max(0.8, area * 0.12 * location_factor[district] + random.normalvariate(0, 0.45))
+        
+        # Randomize new features
+        num_bedrooms = random.choice([1, 2, 3])
+        num_bathrooms = random.choice([1, 2])
+        has_ac = random.choice([0, 1])
+        furnished = random.choice([0, 1])
+        floor = random.randint(1, 8)
+        room_type = random.choice(["studio", "apartment", "house"])
+        
+        # Proximity to center calculation
+        dist_to_center = DISTRICT_DISTANCES.get(district, 5.0)
+        dist_factor = max(0.5, 1.0 - (dist_to_center - 2.0) * 0.04) # further is cheaper
+        
+        price_multiplier = 1.0
+        if furnished == 1:
+            price_multiplier += 0.15
+        if has_ac == 1:
+            price_multiplier += 0.10
+        price_multiplier += (num_bedrooms - 1) * 0.20
+        price_multiplier += (num_bathrooms - 1) * 0.10
+        if room_type == "apartment":
+            price_multiplier += 0.15
+        elif room_type == "house":
+            price_multiplier += 0.35
+            
+        price = max(0.8, (area * 0.12 * location_factor[district] * dist_factor * price_multiplier) + random.normalvariate(0, 0.35))
+        
+        # Build Mô tả that includes these details
+        ac_str = "có điều hòa" if has_ac == 1 else "quạt trần"
+        furn_str = "full nội thất" if furnished == 1 else "phòng trống"
+        type_str = "căn hộ chung cư mini" if room_type == "apartment" else ("nhà nguyên căn" if room_type == "house" else "phòng trọ studio")
+        
+        desc = f"Cho thuê {type_str} rộng {area}m² tại Quận {district}. Có {num_bedrooms} phòng ngủ, {num_bathrooms} WC khép kín, {ac_str}, {furn_str}, ở tầng {floor}."
+
         day = random.randint(1, 28)
         month = random.randint(1, 12)
         year = random.choice([2022, 2023, 2024, 2025, 2026])
         rows.append(
             {
-                "Mô tả": f"Cho thuê phòng trọ {area}m² tại Quận {district}, đầy đủ nội thất",
+                "Mô tả": desc,
                 "Diện tích": f"{area}m²",
                 "Vị trí": f"Quận {district}, Hà Nội",
                 "Ngày đăng": f"Thứ 2, 08:00 {day:02d}/{month:02d}/{year}",
@@ -401,3 +531,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
